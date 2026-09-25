@@ -6,7 +6,7 @@
   "type": "commonjs",
   "scripts": {
     "start": "node server.js",
-    "test": "node test/impose.test.js && node test/preflight.test.js && node test/preflight-batch.test.js && node test/preflight-diff.test.js && node test/quote.test.js && node test/cutting.test.js && node test/marks.test.js && node test/creep.test.js && node test/reprint.test.js && node test/api.test.js"
+    "test": "node test/upload-gate.test.js && node test/impose.test.js && node test/preflight.test.js && node test/preflight-batch.test.js && node test/preflight-diff.test.js && node test/quote.test.js && node test/cutting.test.js && node test/marks.test.js && node test/creep.test.js && node test/reprint.test.js && node test/api.test.js"
   },
   "engines": {
     "node": ">=18"

@@ -15,11 +15,17 @@ const {
 const { diffPreflightReports } = require('./lib/preflight-diff');
 const { buildPaperQuote } = require('./lib/quote');
 const { buildCuttingPlan } = require('./lib/cutting');
+const { createUploadGate } = require('./lib/upload-gate');
 
 const app = express();
 const PORT = parseInt(process.env.PORT, 10) || 3000;
 const MAX_FILE_SIZE = parseInt(process.env.MAX_FILE_SIZE_MB, 10) * 1024 * 1024
   || 50 * 1024 * 1024;
+
+// 统一资源闸门：五个 PDF 上传接口在进入 multer 前先过并发准入（忙时 503 +
+// Retry-After）与实际上传总量计数（默认 100MB，chunked 也生效，超限 413）；
+// 单文件大小上限与批量逐文件失败隔离仍由 multer 与各路由逻辑保留。
+const { uploadGate } = createUploadGate();
 
 // 上传文件仅保留在内存中（拼版后直接返回，不写磁盘）
 const upload = multer({
@@ -74,7 +80,7 @@ function readImposeOptions(body) {
 
 // 印前校验接口：仅逐页检查并返回 JSON 报告，不生成拼版文件。
 // 报告中即便存在错误/警告也以 200 返回（校验结果本身），不阻断后续拼版。
-app.post('/api/preflight', upload.single('pdf'), async (req, res) => {
+app.post('/api/preflight', ...uploadGate, upload.single('pdf'), async (req, res) => {
   if (!req.file) return missingFileResponse(res);
   if (!looksLikePdf(req.file)) {
     return res.status(400).json({ error: '仅支持 PDF 文件' });
@@ -98,7 +104,7 @@ app.post('/api/preflight', upload.single('pdf'), async (req, res) => {
 // 只要批量请求本身可解析就整体返回 200（含部分或全部文件失败的情况）。
 const batchUpload = upload.array('pdfs', BATCH_PREFLIGHT_MAX_FILES);
 
-app.post('/api/preflight/batch', (req, res) => {
+app.post('/api/preflight/batch', ...uploadGate, (req, res) => {
   batchUpload(req, res, (err) => {
     if (err) {
       // multer .array() 超过 maxCount 或出现其他文件字段时都会抛
@@ -151,7 +157,7 @@ const diffUpload = upload.fields([
   { name: 'delivery', maxCount: 1 },
 ]);
 
-app.post('/api/preflight/diff', diffUpload, async (req, res) => {
+app.post('/api/preflight/diff', ...uploadGate, diffUpload, async (req, res) => {
   const files = req.files || {};
   const baselineFile = files.baseline && files.baseline[0];
   const deliveryFile = files.delivery && files.delivery[0];
@@ -202,7 +208,7 @@ app.post('/api/preflight/diff', diffUpload, async (req, res) => {
 });
 
 // 拼版接口：上传 PDF，返回拼版后的 PDF；拼版页序方案通过响应头回传
-app.post('/api/impose', upload.single('pdf'), async (req, res) => {
+app.post('/api/impose', ...uploadGate, upload.single('pdf'), async (req, res) => {
   try {
     if (!req.file) {
       return missingFileResponse(res);
@@ -241,7 +247,7 @@ app.post('/api/impose', upload.single('pdf'), async (req, res) => {
 // 按与 /api/impose 相同的拼版选项复用拼版方案，定位受损页所在印张后
 // 成对抽取正背面生成补印 PDF；补印明细通过响应头 X-Reprint-Plan 回传。
 // 空输入、格式错误、越界页码等输入问题返回 400；损坏/加密 PDF 返回 422。
-app.post('/api/reprint', upload.single('pdf'), async (req, res) => {
+app.post('/api/reprint', ...uploadGate, upload.single('pdf'), async (req, res) => {
   try {
     if (!req.file) {
       return missingFileResponse(res);
@@ -342,6 +348,9 @@ app.post('/api/cutting', (req, res) => {
 
 // JSON 解析错误等兜底
 app.use((err, req, res, next) => {
+  // 闸门（413/503）可能在 multer 异步回调 next(err) 前已结束响应；
+  // 此时不能再写响应，交给 Express 默认处理器销毁连接即可
+  if (res.headersSent) return next(err);
   if (err && err.code === 'LIMIT_FILE_SIZE') {
     return res.status(413).json({ error: `文件超过大小限制（${MAX_FILE_SIZE / 1024 / 1024}MB）` });
   }

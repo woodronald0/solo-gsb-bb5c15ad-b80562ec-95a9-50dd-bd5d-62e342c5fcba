@@ -184,7 +184,7 @@
 docker compose up -d --build
 ```
 
-镜像构建时自动完成 `npm install`，容器启动即服务就绪，无需手动安装依赖。容器同时提供拼版、单文件印前校验、批量印前校验（含交付放行判定）、印前报告差异对比、用纸报价、批量裁切下料与缺页补印七类接口，无需额外端口或环境变量（骑马钉爬移补偿为拼版/补印接口的可选表单字段，无需额外配置）。
+镜像构建时自动完成 `npm install`，容器启动即服务就绪，无需手动安装依赖。容器同时提供拼版、单文件印前校验、批量印前校验（含交付放行判定）、印前报告差异对比、用纸报价、批量裁切下料与缺页补印七类接口，无需额外端口或环境变量即可直接使用（`docker-compose.yml` 已内置上传资源闸门等全部默认配置；骑马钉爬移补偿为拼版/补印接口的可选表单字段，无需额外配置）。上传接口在忙时会返回 `503 + Retry-After`、总上传量超限时返回 `413`，详见下文「配置」一节。
 
 启动后在浏览器访问入口地址：
 
@@ -213,12 +213,27 @@ npm start
 
 ## 配置
 
-通过环境变量配置（在 `docker-compose.yml` 的 `environment` 中修改）：
+通过环境变量配置（在 `docker-compose.yml` 的 `environment` 中修改；均已内置默认值，`docker compose up --build` 可零配置直接启动）：
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `PORT` | `3000` | 服务监听端口（容器内端口） |
 | `MAX_FILE_SIZE_MB` | `50` | 单个上传 PDF 的大小上限（MB）；差异对比接口中基准与待交付两份文件、批量校验接口中每个文件均各自独立适用该上限 |
+| `MAX_TOTAL_UPLOAD_SIZE_MB` | `100` | 单个 multipart 请求的**总上传量**上限（MB）：按服务端**实际接收字节**累计（含 multipart 表单与分帧字节，非单纯文件大小之和）；带 `Content-Length` 且超限的请求直接拒绝，**无 `Content-Length` 的分块传输（chunked）同样随收随计**，超限返回 `413` |
+| `UPLOAD_MAX_CONCURRENT` | `4` | 五个 PDF 上传接口（单文件校验、批量校验、差异对比、拼版、补印）的**全局并发处理上限**；名额已占满时，新请求在进入 multer 解析**之前**立即返回 `503` 与 `Retry-After`。每个请求的名额占用至响应结束或连接断开，**multer 解析失败（413/400/500）也会释放**，不会泄漏名额 |
+| `UPLOAD_RETRY_AFTER_SECONDS` | `5` | `503` 响应中 `Retry-After` 头建议客户端等待的秒数（同时在响应 JSON 的 `retryAfterSeconds` 中给出） |
+
+> 两级大小限制相互独立：单文件超 `MAX_FILE_SIZE_MB` 由 multer 拒绝（批量接口中只影响该文件），整个请求实际接收字节超 `MAX_TOTAL_UPLOAD_SIZE_MB` 由统一闸门拒绝 `413`。例如默认配置下批量接口最多 10 个文件，每文件各自不超过 50 MB，但整次上传的实际接收总量不得超过 100 MB。
+
+### 上传请求的拒绝语义
+
+所有 PDF 上传接口（`/api/preflight`、`/api/preflight/batch`、`/api/preflight/diff`、`/api/impose`、`/api/reprint`）在进入 multer 前先经过统一资源闸门：
+
+- **`503 Service Unavailable` + `Retry-After: <秒>`**：当前在处理的上传请求已达 `UPLOAD_MAX_CONCURRENT`。响应**在解析请求体之前**立即发出，客户端应按 `Retry-After` 退避重试（响应体为 `{ "error": "...", "retryAfterSeconds": N }`）；响应发出后服务端不再读取该请求体。
+- **`413 Payload Too Large`（总上传量超限）**：实际接收字节超过 `MAX_TOTAL_UPLOAD_SIZE_MB`（带 `Content-Length` 时于读取前判定，chunked 时接收过程中判定）。服务端随即切断通向解析器的字节流并停止读取，**不会**继续把文件缓冲进内存；响应体为 `{ "error": "本次上传总量超过限制（上限 N MB，含表单与分帧字节）" }`。
+- **`413 Payload Too Large`（单文件超限）**：multer 的既有行为保持不变：单文件超过 `MAX_FILE_SIZE_MB` 时拒绝；批量校验中该错误仅计入对应文件，**不影响同批其他文件**。
+- 上述任一拒绝（以及 `400`/`422`/正常 `200`）响应结束或客户端中途断开后，占用的并发名额立即释放。
+- 纯 JSON 接口（`/api/quote`、`/api/cutting`）与 `GET /api/health` 不受上传闸门限制。
 
 如需更换宿主机映射端口，修改 `docker-compose.yml` 中 `ports` 的左侧端口，例如 `"8080:3000"`，然后访问 http://localhost:8080 。
 
@@ -254,6 +269,8 @@ npm start
 | `POST` | `/api/cutting` | JSON body `{ plan, papers, requiredSheets }`：`plan`/`papers` 同 `/api/quote`；`requiredSheets` 为所需印张数（1～1000000 的整数，数字字符串也接受）。沿用 `plan.sheet` 实际输出印张尺寸，对每种原纸以**带记忆化的矩形分割搜索**生成**直线贯通裁切树**（印张可旋转 90°，非面积估算/非重叠），返回每种原纸的裁切图坐标与裁切树、单张产出 `yieldsPerSheet`、所需原纸张数 `sheetsRequired`、尾张余量 `lastSheet`、废料面积 `waste`，并按所需张数、废料面积给出 `recommended`。参数非法（尺寸非正/数量非整数等）返回 `400`；**无原纸可裁时返回 `200` 且 `feasible: false`**，原因在 `reason` 与各选项 `reasons` |
 | `POST` | `/api/reprint` | multipart 表单字段 `pdf` 上传原 PDF、`pages` 为受损原稿页码表达式（如 `2,5-7`，逗号分隔单页/区间，支持全角逗号与全角区间号）；拼版选项字段与 `/api/impose` 相同（`signatureMode`/`maxSheetsPerSignature`/`registrationMarks`/`creepCompensation`/`paperThicknessMm`）。服务端复用拼版方案定位受损页所在印张（同一印张命中多页只补印一次，分册模式累计各帖输出页偏移），按原印张顺序成对抽取正背面生成补印 PDF（与完整拼版对应印张逐页一致：保留原印张尺寸、定位标记与爬移平移/半区裁切），补印明细在响应头 `X-Reprint-Plan`（URL 编码的 JSON，含受损页码 `pages`、补印张数 `sheetCount`、`creep` 补偿状态与每张纸的帖号 `signature`/帖内张号 `sheet`/命中页码 `hitPages`/原输出页码 `outputPages`/单侧内移量 `creepShiftMm`）。缺文件/非 PDF/空输入/格式错误/越界页码/非法纸厚返回 `400`；损坏或加密 PDF 返回 `422` |
 | `GET` | `/api/health` | 健康检查，返回 `{ "ok": true }` |
+
+> 上表五个 multipart 上传接口统一受资源闸门保护：忙时（超过 `UPLOAD_MAX_CONCURRENT` 个并发）返回 `503` 与 `Retry-After`，单请求实际接收总量超过 `MAX_TOTAL_UPLOAD_SIZE_MB` 时返回 `413`，完整拒绝语义见上文[「上传请求的拒绝语义」](#上传请求的拒绝语义)。
 
 ### 印前校验 JSON 报告结构
 

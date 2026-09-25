@@ -10,4 +10,12 @@ services:
       PORT: "3000"
       # 单个上传 PDF 的大小上限（MB）；差异对比的两份文件、批量校验（最多 10 个）的每个文件各自适用
       MAX_FILE_SIZE_MB: "50"
+      # 单个 multipart 请求的总上传量上限（MB，按实际接收字节累计，
+      # 含 multipart 分帧字节；无 Content-Length 的分块传输同样生效），超限返回 413
+      MAX_TOTAL_UPLOAD_SIZE_MB: "100"
+      # 五个 PDF 上传接口的全局并发处理上限；占满时新请求在进入解析前立即返回
+      # 503 与 Retry-After，名额占用至响应结束或连接断开（解析失败也会释放）
+      UPLOAD_MAX_CONCURRENT: "4"
+      # 503 响应 Retry-After 头建议的重试等待秒数
+      UPLOAD_RETRY_AFTER_SECONDS: "5"
     restart: unless-stopped
