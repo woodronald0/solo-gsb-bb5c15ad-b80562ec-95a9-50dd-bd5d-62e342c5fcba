@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>小册子骑马钉拼版</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header class="site-header">
+    <h1>骑马钉小册子拼版</h1>
+    <p class="subtitle">每张纸 4 页 · 自动补空白页 · 自动适配混合尺寸与旋转页面</p>
+  </header>
+
+  <main>
+    <section class="card upload-card">
+      <label id="dropzone" class="dropzone" for="file-input">
+        <input type="file" id="file-input" accept="application/pdf,.pdf" hidden />
+        <span class="drop-icon">📄</span>
+        <span class="drop-text">点击选择 PDF，或将 PDF 拖拽到此处</span>
+        <span id="file-name" class="file-name"></span>
+      </label>
+
+      <div class="options">
+        <label class="option-check">
+          <input type="checkbox" id="signature-mode" />
+          <span>启用分册签帖模式（按纸张容量切分为多个骑马钉签帖）</span>
+        </label>
+        <label id="max-sheets-field" class="option-field" hidden>
+          <span>每帖最多纸张数：</span>
+          <input type="number" id="max-sheets" min="1" max="20" step="1" value="4" />
+          <span class="option-hint">1～20 张（每纸 4 页，即每帖 4～80 页；仅在每帖末尾补白）</span>
+        </label>
+        <label class="option-check">
+          <input type="checkbox" id="registration-marks" />
+          <span>添加印张定位标记（版心四周各留 8 mm 空白，四角绘制裁切线，中央折线上下端绘制定位线）</span>
+        </label>
+        <label class="option-check">
+          <input type="checkbox" id="creep-compensation" />
+          <span>启用骑马钉爬移补偿（内帖向书脊内移；正背两面左页向右、右页向左平移，页序与纸张尺寸不变）</span>
+        </label>
+        <label id="paper-thickness-field" class="option-field" hidden>
+          <span>纸张厚度：</span>
+          <input type="number" id="paper-thickness" min="0.05" max="0.5" step="0.001" value="0.1" />
+          <span class="option-hint">0.05～0.5 mm；每帖从外到内单侧内移量＝（帖内张号－1）×纸厚，分册签帖各帖分别从零计算</span>
+        </label>
+      </div>
+
+      <div class="btn-row">
+        <button id="preflight-btn" class="btn secondary" disabled>运行印前校验</button>
+        <button id="impose-btn" class="btn primary" disabled>开始拼版</button>
+      </div>
+      <p id="status" class="status" role="status"></p>
+      <p class="preflight-hint">
+        印前校验只检查不拼版：逐页核对页面尺寸、旋转角、透明度与可提取文字；
+        校验结果不会阻止后续拼版。
+      </p>
+    </section>
+
+    <section id="paper-card" class="card paper-card">
+      <h2>印刷用纸规格</h2>
+      <p class="paper-intro">
+        维护最多 <strong>8 种</strong>纸张规格（宽、高、单价、开机费），仅保存在本机浏览器中。
+        拼版完成后，系统按拼版的统一面板尺寸与纸张数，对每种纸张枚举<strong>原向 / 旋转 90°</strong>
+        两个方向，自动选择能容纳版面的<strong>最低总成本</strong>方案；全部不能容纳时给出明确原因。
+        下方拼版结果中的<strong>批量裁切下料</strong>也复用这里维护的规格。
+      </p>
+      <div class="table-wrap">
+        <table class="paper-table">
+          <thead>
+            <tr>
+              <th>名称</th><th>宽（mm）</th><th>高（mm）</th>
+              <th>单价（元/张，留空为 0）</th><th>开机费（元/次，留空为 0）</th><th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="paper-table-body"></tbody>
+        </table>
+      </div>
+      <div class="paper-actions">
+        <button id="paper-add-btn" class="btn small secondary" type="button">＋ 增加纸张规格</button>
+        <button id="paper-reset-btn" class="btn small ghost" type="button">恢复默认</button>
+      </div>
+      <p id="paper-error" class="paper-error" role="alert"></p>
+    </section>
+
+    <section id="diff-card" class="card diff-card">
+      <h2>印前报告差异对比</h2>
+      <p class="diff-intro">
+        分别上传<strong>基准 PDF</strong>（上一版 / 客户确认版）与<strong>待交付 PDF</strong>（本次导出文件），
+        服务端复用逐页校验并按「页码 + 问题代码」对齐，列出新增、已解决与仍存在的问题及页数变化。
+        对比只做检查、不生成拼版文件，也不影响上方单文件校验与拼版。
+      </p>
+      <div class="diff-files">
+        <label class="diff-file-pick" for="diff-baseline-input">
+          <span class="diff-file-label">基准 PDF</span>
+          <input type="file" id="diff-baseline-input" accept="application/pdf,.pdf" hidden />
+          <span class="diff-file-name" id="diff-baseline-name">点击选择基准 PDF</span>
+        </label>
+        <span class="diff-arrow" aria-hidden="true">→</span>
+        <label class="diff-file-pick" for="diff-delivery-input">
+          <span class="diff-file-label">待交付 PDF</span>
+          <input type="file" id="diff-delivery-input" accept="application/pdf,.pdf" hidden />
+          <span class="diff-file-name" id="diff-delivery-name">点击选择待交付 PDF</span>
+        </label>
+      </div>
+      <button id="diff-btn" class="btn primary" disabled>对比两份报告</button>
+      <p id="diff-status" class="status" role="status"></p>
+    </section>
+
+    <section id="batch-card" class="card batch-card">
+      <h2>批量印前校验（最多 10 个 PDF）</h2>
+      <p class="batch-intro">
+        一次选择 <strong>1～10 个 PDF</strong>，服务端按选择顺序逐个复用单文件校验：
+        页面尺寸、旋转角、透明度与可提取文字。单个文件缺失、为空、非 PDF、损坏或加密时
+        <strong>只记录该文件的失败原因，不影响其他文件</strong>。批量校验只做检查、不生成拼版文件，
+        也不影响上方单文件校验、差异对比与拼版。
+      </p>
+      <div class="batch-files">
+        <label class="batch-file-pick" for="batch-files-input">
+          <span class="batch-file-label">选择 PDF（可多选）</span>
+          <input type="file" id="batch-files-input" accept="application/pdf,.pdf" multiple hidden />
+          <span class="batch-file-name" id="batch-pick-name">点击选择 1～10 个 PDF 文件</span>
+        </label>
+      </div>
+      <ul id="batch-file-list" class="batch-file-list" hidden></ul>
+      <details class="batch-policy" id="batch-policy-box">
+        <summary>交付放行策略（按问题代码设置处置；不设置时按级别取默认：错误阻断、警告复核、提示忽略）</summary>
+        <p class="batch-policy-hint">
+          每个问题代码可单独设为 <strong>阻断交付</strong>、<strong>需复核</strong> 或 <strong>忽略</strong>；
+          留空「默认」即按检测级别套用默认处置。策略只保存在本机浏览器，随每次批量校验提交，
+          并完整写入下载的批量 JSON。单文件检测报告及其 <code>passed</code> 含义不受影响。
+        </p>
+        <div class="table-wrap">
+          <table class="batch-policy-table">
+            <thead>
+              <tr>
+                <th>问题代码</th><th>检查项</th><th>检测级别</th><th>默认处置</th><th>本次放行处置</th>
+              </tr>
+            </thead>
+            <tbody id="batch-policy-body"></tbody>
+          </table>
+        </div>
+        <div class="paper-actions">
+          <button id="batch-policy-reset-btn" class="btn small ghost" type="button">全部恢复默认处置</button>
+        </div>
+      </details>
+      <div class="btn-row batch-btn-row">
+        <button id="batch-run-btn" class="btn primary" disabled>开始批量校验</button>
+        <button id="batch-clear-btn" class="btn ghost" type="button" disabled>清空选择</button>
+      </div>
+      <p id="batch-status" class="status" role="status"></p>
+    </section>
+
+    <section id="batch-report" class="card batch-report-card" hidden>
+      <div class="report-head">
+        <h2>批量校验结果</h2>
+        <button id="batch-download-btn" class="btn small success" type="button">下载完整批量 JSON</button>
+      </div>
+      <p class="batch-verdict-label">检测结论（错误/警告/提示，含义与原报告一致）</p>
+      <p id="batch-verdict" class="report-verdict"></p>
+      <p class="batch-verdict-label">交付放行判定（按下方策略：阻断优先于警告；无法校验为未判定）</p>
+      <p id="batch-release-verdict" class="report-verdict"></p>
+      <div id="batch-summary" class="report-summary"></div>
+      <details class="page-details" open>
+        <summary>各文件结果（点击行展开完整问题明细，共 <span id="batch-file-count">0</span> 个）</summary>
+        <div class="table-wrap">
+          <table class="page-table batch-table">
+            <thead>
+              <tr>
+                <th>#</th><th>检测状态</th><th>放行判定</th><th>文件名</th><th>页数</th>
+                <th>错误</th><th>警告</th><th>提示</th><th>问题合计</th>
+              </tr>
+            </thead>
+            <tbody id="batch-table-body"></tbody>
+          </table>
+        </div>
+      </details>
+      <details class="page-details">
+        <summary>按问题代码汇总（<span id="batch-code-count">0</span> 种代码）</summary>
+        <div class="table-wrap">
+          <table class="page-table batch-code-table">
+            <thead>
+              <tr>
+                <th>问题代码</th><th>级别</th><th>放行处置</th><th>问题</th><th>总次数</th><th>涉及文件数</th><th>涉及文件</th>
+              </tr>
+            </thead>
+            <tbody id="batch-code-table-body"></tbody>
+          </table>
+        </div>
+      </details>
+      <details class="page-details" id="batch-policy-report-box">
+        <summary>本次交付放行策略</summary>
+        <div class="table-wrap">
+          <table class="page-table batch-policy-result-table">
+            <thead>
+              <tr>
+                <th>问题代码</th><th>检测级别</th><th>检查项</th><th>处置</th><th>来源</th>
+              </tr>
+            </thead>
+            <tbody id="batch-policy-result-body"></tbody>
+          </table>
+        </div>
+      </details>
+    </section>
+
+    <section id="diff-report" class="card diff-report-card" hidden>
+      <div class="report-head">
+        <h2>差异对比结果</h2>
+        <button id="diff-download-btn" class="btn small success" type="button">下载差异 JSON</button>
+      </div>
+      <p id="diff-verdict" class="report-verdict"></p>
+      <div id="diff-meta" class="diff-meta"></div>
+      <div id="diff-summary" class="report-summary"></div>
+      <div class="report-filters" role="group" aria-label="按差异类型筛选">
+        <button type="button" class="diff-filter-chip active" data-group="added">新增问题 <span class="chip-count" id="diff-count-added">0</span></button>
+        <button type="button" class="diff-filter-chip" data-group="resolved">已解决 <span class="chip-count" id="diff-count-resolved">0</span></button>
+        <button type="button" class="diff-filter-chip" data-group="persistent">仍存在 <span class="chip-count" id="diff-count-persistent">0</span></button>
+      </div>
+      <ul id="diff-issue-list" class="issue-list"></ul>
+      <p id="diff-issue-empty" class="report-empty" hidden></p>
+
+      <details class="page-details" open>
+        <summary>页级差异明细（<span id="diff-page-count">0</span> 页）</summary>
+        <div class="table-wrap">
+          <table class="page-table diff-page-table">
+            <thead>
+              <tr>
+                <th>页码</th><th>状态</th><th>基准 → 待交付（尺寸 pt / 旋转 / 透明 / 文字）</th>
+                <th>新增</th><th>已解决</th><th>仍存在</th>
+              </tr>
+            </thead>
+            <tbody id="diff-page-table-body"></tbody>
+          </table>
+        </div>
+      </details>
+    </section>
+
+    <section id="report" class="card report-card" hidden>
+      <div class="report-head">
+        <h2>印前校验报告</h2>
+        <button id="report-download-btn" class="btn small success" type="button">下载 JSON 报告</button>
+      </div>
+      <p id="report-verdict" class="report-verdict"></p>
+      <div id="report-summary" class="report-summary"></div>
+      <div class="report-filters" role="group" aria-label="按级别筛选">
+        <button type="button" class="filter-chip active" data-level="all">全部 <span class="chip-count" data-count="all">0</span></button>
+        <button type="button" class="filter-chip" data-level="error">错误 <span class="chip-count" data-count="error">0</span></button>
+        <button type="button" class="filter-chip" data-level="warning">警告 <span class="chip-count" data-count="warning">0</span></button>
+        <button type="button" class="filter-chip" data-level="info">提示 <span class="chip-count" data-count="info">0</span></button>
+      </div>
+      <p id="report-empty" class="report-empty" hidden>未发现印前问题，可以直接拼版。</p>
+      <ul id="issue-list" class="issue-list"></ul>
+
+      <details class="page-details">
+        <summary>逐页检测明细（<span id="page-detail-count">0</span> 页）</summary>
+        <div class="table-wrap">
+          <table class="page-table">
+            <thead>
+              <tr>
+                <th>页码</th><th>页面尺寸（有效 / 旋转后）</th><th>旋转角</th>
+                <th>透明度</th><th>可提取文字</th><th>问题</th>
+              </tr>
+            </thead>
+            <tbody id="page-table-body"></tbody>
+          </table>
+        </div>
+      </details>
+    </section>
+
+    <section id="summary" class="card summary-card" hidden>
+      <h2>拼版结果</h2>
+      <ul id="summary-list" class="summary-list"></ul>
+      <div id="signature-summary" class="signature-summary" hidden></div>
+
+      <div id="quote-box" class="quote-box" hidden>
+        <div class="quote-head">
+          <h3>印刷用纸报价</h3>
+          <div class="quote-head-actions">
+            <button id="quote-refresh-btn" class="btn small secondary" type="button">按当前纸张重新报价</button>
+            <button id="quote-download-btn" class="btn small success" type="button">下载报价 JSON</button>
+          </div>
+        </div>
+        <p id="quote-status" class="status" role="status"></p>
+        <div id="quote-result" class="quote-result" hidden></div>
+      </div>
+
+      <div id="cutting-box" class="cutting-box" hidden>
+        <div class="cutting-head">
+          <h3>批量裁切下料</h3>
+          <div class="cutting-head-actions">
+            <button id="cutting-calc-btn" class="btn small secondary" type="button">计算裁切方案</button>
+            <button id="cutting-download-btn" class="btn small success" type="button">下载裁切 JSON</button>
+          </div>
+        </div>
+        <label class="cutting-count-field">
+          <span>所需印张数：</span>
+          <input type="number" id="cutting-required" min="1" max="1000000" step="1" value="1" />
+          <span class="option-hint">1～1000000 的整数；按拼版实际输出印张尺寸在每种原纸上以直线贯通裁切排料（印张可旋转 90°）</span>
+        </label>
+        <p id="cutting-status" class="status" role="status"></p>
+        <div id="cutting-result" class="cutting-result" hidden></div>
+      </div>
+
+      <div id="reprint-box" class="reprint-box" hidden>
+        <div class="reprint-head">
+          <h3>缺页补印</h3>
+          <div class="reprint-head-actions">
+            <button id="reprint-btn" class="btn small secondary" type="button">生成补印 PDF</button>
+            <button id="reprint-download-btn" class="btn small success" type="button" disabled>下载补印 PDF</button>
+          </div>
+        </div>
+        <label class="reprint-pages-field">
+          <span>受损原稿页码：</span>
+          <input type="text" id="reprint-pages" placeholder="如 2,5-7" />
+          <span class="option-hint">单个页码或区间，逗号分隔；同一印张命中多页只补印一次，按原印张顺序正背成对输出，沿用本次纸厚与爬移补偿，保留原印张尺寸与定位标记</span>
+        </label>
+        <p id="reprint-status" class="status" role="status"></p>
+        <div id="reprint-result" class="reprint-result" hidden></div>
+      </div>
+
+      <button id="download-btn" class="btn success">下载拼版 PDF</button>
+    </section>
+
+    <section id="preview" class="preview-section" hidden>
+      <h2>纸张预览（正面 / 背面）</h2>
+      <div class="legend">
+        <span class="legend-item"><span class="dot page"></span>原始页</span>
+        <span class="legend-item"><span class="dot blank"></span>补的空白页</span>
+      </div>
+      <p class="rule-hint">
+        折页方式：每张纸左右对折后骑马钉装订。正面左侧为大页码、右侧为小页码；
+        翻面后背面左右互换，逐张向内递进。
+      </p>
+      <div id="sheets" class="sheets"></div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <span>小型印刷店拼版工具 · Node.js + Express + pdf-lib</span>
+  </footer>
+
+  <script src="/app.js"></script>
+</body>
+</html>

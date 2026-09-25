@@ -1,0 +1,19 @@
+{
+  "name": "booklet-imposer",
+  "version": "1.7.0",
+  "description": "骑马钉小册子 PDF 拼版 Web 应用：每张纸 4 页，自动补空白页并按骑马钉规则重排；可选印张定位标记（版心四周各留 8mm 空白并绘制裁切线/折线定位线，报价按实际输出印张判断）与骑马钉爬移补偿（输入纸厚 0.05～0.5mm，每帖从外到内按帖内张号单侧内移（张号－1）×纸厚，正背两面左页右移/右页左移并在各自半区裁切，页序与纸张尺寸不变，缺页补印沿用本次纸厚与选项）；附独立 PDF 印前校验报告（尺寸/旋转/透明度/可提取文字）、最多 10 个 PDF 的批量印前校验（单文件失败不阻断、按问题代码汇总，并按代码级放行策略给出阻断/需复核/放行/未判定的交付放行判定）、差异对比、印刷用纸报价（枚举纸张旋转方向，选最低成本方案）、批量裁切下料（所需印张数 + 带记忆化矩形分割搜索生成直线贯通裁切树，按所需原纸张数/废料面积推荐，可下载裁切 JSON）与缺页补印（按受损页码复用拼版方案定位印张，同张只补一次、成对抽取正背面生成补印 PDF，保留原印张尺寸与定位标记）",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/impose.test.js && node test/preflight.test.js && node test/preflight-batch.test.js && node test/preflight-diff.test.js && node test/quote.test.js && node test/cutting.test.js && node test/marks.test.js && node test/creep.test.js && node test/reprint.test.js && node test/api.test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "multer": "^1.4.5-lts.1",
+    "pdf-lib": "^1.17.1"
+  }
+}
