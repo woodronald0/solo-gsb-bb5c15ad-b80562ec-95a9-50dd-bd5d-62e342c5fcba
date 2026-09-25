@@ -10,4 +10,9 @@ services:
       PORT: "3000"
       # 单个上传 PDF 的大小上限（MB）；差异对比的两份文件、批量校验（最多 10 个）的每个文件各自适用
       MAX_FILE_SIZE_MB: "50"
+      # 上传资源闸门：同时处理的上传请求数上限，满员时新上传立即返回 503 + Retry-After
+      MAX_CONCURRENT_UPLOADS: "4"
+      # 上传资源闸门：单个 multipart 请求的总上传字节上限（MB，按实际接收字节累计，
+      # 无 Content-Length 的分块传输同样生效），超限返回 413
+      MAX_TOTAL_UPLOAD_MB: "100"
     restart: unless-stopped
